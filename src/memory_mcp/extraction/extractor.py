@@ -198,13 +198,18 @@ class ConversationExtractor:
         conversation_id: str,
         queue: asyncio.Queue[Observation | None],
     ) -> str:
-        """Run the streaming API call, parse observations incrementally, return full text."""
-        buffer = ""
-        parser = _IncrementalObservationParser(conversation_id)
+        """Run the streaming API call, parse observations incrementally, return full text.
 
-        # Run the synchronous streaming call in an executor
-        def _do_stream():
-            return client.messages.stream(
+        The synchronous stream iteration runs in a thread so the event loop
+        stays free to execute embedding tasks concurrently.
+        """
+        parser = _IncrementalObservationParser(conversation_id)
+        loop = asyncio.get_event_loop()
+
+        def _iterate_stream() -> str:
+            """Synchronous: open stream, iterate chunks, push observations."""
+            buffer = ""
+            ctx = client.messages.stream(
                 model=self._settings.extraction_model,
                 max_tokens=8192,
                 system=system,
@@ -215,20 +220,17 @@ class ConversationExtractor:
                     }
                 ],
             )
+            with ctx as stream:
+                for text_chunk in stream.text_stream:
+                    buffer += text_chunk
+                    new_obs = parser.feed(text_chunk)
+                    for obs in new_obs:
+                        loop.call_soon_threadsafe(queue.put_nowait, obs)
+            return buffer
 
-        loop = asyncio.get_event_loop()
-        stream_ctx = await loop.run_in_executor(None, _do_stream)
-
-        # Iterate over the stream — each text chunk is yielded
-        with stream_ctx as stream:
-            for text_chunk in stream.text_stream:
-                buffer += text_chunk
-                new_obs = parser.feed(text_chunk)
-                for obs in new_obs:
-                    await queue.put(obs)
+        raw = await loop.run_in_executor(None, _iterate_stream)
 
         # Handle markdown code blocks
-        raw = buffer
         if raw.startswith("```"):
             raw = raw.split("\n", 1)[1]
             if raw.endswith("```"):
