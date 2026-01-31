@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from unittest.mock import MagicMock, patch
 
@@ -15,6 +16,51 @@ from memory_mcp.tools.save import save_conversation_memory
 from memory_mcp.tools.update import update_memory
 
 
+# ---------------------------------------------------------------------------
+# Helpers for mocking streaming
+# ---------------------------------------------------------------------------
+
+class _FakeTextStream:
+    def __init__(self, chunks: list[str]):
+        self._chunks = chunks
+    def __iter__(self):
+        return iter(self._chunks)
+
+class _FakeStreamContext:
+    def __init__(self, chunks: list[str]):
+        self._stream = _FakeTextStream(chunks)
+    def __enter__(self):
+        return self
+    def __exit__(self, *args):
+        pass
+    @property
+    def text_stream(self):
+        return self._stream
+
+def _make_stream_chunks(response_dict: dict, chunk_size: int = 50) -> list[str]:
+    full = json.dumps(response_dict)
+    return [full[i:i + chunk_size] for i in range(0, len(full), chunk_size)]
+
+
+def _patch_extractor_streaming(extractor, response_dict):
+    """Return a patch context that mocks the streaming API for an extractor."""
+    chunks = _make_stream_chunks(response_dict)
+    return patch.object(
+        extractor, "_ensure_client",
+        return_value=_make_mock_client(chunks),
+    )
+
+
+def _make_mock_client(chunks):
+    mock_client = MagicMock()
+    mock_client.messages.stream.return_value = _FakeStreamContext(chunks)
+    return mock_client
+
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+
 @pytest.mark.asyncio
 async def test_save_and_recall_flow(
     tmp_data_dir, mock_embedder, sample_extraction_response
@@ -24,18 +70,7 @@ async def test_save_and_recall_flow(
     store = LanceStore()
     profile_store = UserProfileStore()
 
-    # Mock Claude API response
-    content_block = MagicMock()
-    content_block.text = json.dumps(sample_extraction_response)
-    api_response = MagicMock()
-    api_response.content = [content_block]
-
-    with patch.object(extractor, "_ensure_client") as mock_client_fn:
-        mock_client = MagicMock()
-        mock_client.messages.create.return_value = api_response
-        mock_client_fn.return_value = mock_client
-
-        # Save
+    with _patch_extractor_streaming(extractor, sample_extraction_response):
         result = await save_conversation_memory(
             conversation_text="User: I prefer Python with type hints\nAssistant: Noted!",
             extractor=extractor,
@@ -61,7 +96,6 @@ async def test_save_and_recall_flow(
     )
 
     assert recall_result["user_profile"]["preferred_language"] == "Python with strict typing"
-    # We should get some memories back (relevance depends on mock vectors)
     assert recall_result["total_found"] >= 0
 
 
@@ -74,16 +108,7 @@ async def test_save_recall_update_flow(
     store = LanceStore()
     profile_store = UserProfileStore()
 
-    content_block = MagicMock()
-    content_block.text = json.dumps(sample_extraction_response)
-    api_response = MagicMock()
-    api_response.content = [content_block]
-
-    with patch.object(extractor, "_ensure_client") as mock_client_fn:
-        mock_client = MagicMock()
-        mock_client.messages.create.return_value = api_response
-        mock_client_fn.return_value = mock_client
-
+    with _patch_extractor_streaming(extractor, sample_extraction_response):
         save_result = await save_conversation_memory(
             conversation_text="test conversation",
             extractor=extractor,
@@ -117,16 +142,7 @@ async def test_delete_observation(
     store = LanceStore()
     profile_store = UserProfileStore()
 
-    content_block = MagicMock()
-    content_block.text = json.dumps(sample_extraction_response)
-    api_response = MagicMock()
-    api_response.content = [content_block]
-
-    with patch.object(extractor, "_ensure_client") as mock_client_fn:
-        mock_client = MagicMock()
-        mock_client.messages.create.return_value = api_response
-        mock_client_fn.return_value = mock_client
-
+    with _patch_extractor_streaming(extractor, sample_extraction_response):
         save_result = await save_conversation_memory(
             conversation_text="test",
             extractor=extractor,
@@ -136,7 +152,6 @@ async def test_delete_observation(
         )
 
     # Get an observation ID from the store to delete
-    # Search with a zero-threshold to get all results
     vec = await mock_embedder.embed_query("test")
     results = store.search(vec, limit=10, relevance_threshold=0.0)
 
@@ -170,16 +185,7 @@ async def test_save_no_observations(tmp_data_dir, mock_embedder):
         "profile_updates": [],
     }
 
-    content_block = MagicMock()
-    content_block.text = json.dumps(empty_response)
-    api_response = MagicMock()
-    api_response.content = [content_block]
-
-    with patch.object(extractor, "_ensure_client") as mock_client_fn:
-        mock_client = MagicMock()
-        mock_client.messages.create.return_value = api_response
-        mock_client_fn.return_value = mock_client
-
+    with _patch_extractor_streaming(extractor, empty_response):
         result = await save_conversation_memory(
             conversation_text="hi",
             extractor=extractor,
