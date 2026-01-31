@@ -167,7 +167,7 @@ class ConversationExtractor:
         )
 
         queue: asyncio.Queue[Observation | None] = asyncio.Queue()
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         future: asyncio.Future[ExtractionResult] = loop.create_future()
 
         async def _run_stream() -> None:
@@ -180,11 +180,8 @@ class ConversationExtractor:
             except Exception as exc:
                 if not future.done():
                     future.set_exception(exc)
-                # Signal consumer to stop
-                await queue.put(None)
-                raise
             finally:
-                # Ensure sentinel is always sent
+                # Always signal consumer to stop (exactly once)
                 await queue.put(None)
 
         asyncio.create_task(_run_stream())
@@ -204,7 +201,7 @@ class ConversationExtractor:
         stays free to execute embedding tasks concurrently.
         """
         parser = _IncrementalObservationParser(conversation_id)
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         def _iterate_stream() -> str:
             """Synchronous: open stream, iterate chunks, push observations."""
