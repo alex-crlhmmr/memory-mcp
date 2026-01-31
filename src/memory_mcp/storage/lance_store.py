@@ -53,10 +53,19 @@ class LanceStore:
             self._db = lancedb.connect(str(self._settings.lance_db_path))
         return self._db
 
+    def _table_names(self) -> list[str]:
+        """Get table names, handling both old and new lancedb API."""
+        db = self._ensure_db()
+        result = db.list_tables()
+        # lancedb >= 0.27 returns ListTablesResponse with a .tables attribute
+        if hasattr(result, "tables"):
+            return result.tables
+        return list(result)
+
     def _ensure_observations_table(self) -> lancedb.table.Table:
         if self._obs_table is None:
             db = self._ensure_db()
-            if "observations" in db.list_tables():
+            if "observations" in self._table_names():
                 self._obs_table = db.open_table("observations")
             else:
                 schema = _observations_schema()
@@ -70,7 +79,7 @@ class LanceStore:
     def _ensure_conversations_table(self) -> lancedb.table.Table:
         if self._conv_table is None:
             db = self._ensure_db()
-            if "conversations" in db.list_tables():
+            if "conversations" in self._table_names():
                 self._conv_table = db.open_table("conversations")
             else:
                 empty = pa.table(
