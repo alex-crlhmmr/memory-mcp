@@ -71,6 +71,8 @@ At the start of every conversation, call recall_memories with a query relevant t
 
 When the user asks how they would approach something, what they'd prefer, or asks you to consult memory, call recall_memories with a relevant query and use the returned profile + memories to give a personalized answer.
 
+During a conversation, if you hit a decision point (e.g. choosing an architecture, picking a pattern, explaining a concept) where the user's past preferences or decisions could change the answer, call recall_memories with a focused query. Don't call it speculatively — only when you have a concrete reason to think stored context would shift your approach. Also, if a long stretch of the conversation has passed without a recall, consider calling it with a query relevant to the current topic — context from earlier sessions may have become relevant as the problem evolved.
+
 At the end of every conversation, before closing, call save_conversation_memory with the full conversation text.
 ```
 
