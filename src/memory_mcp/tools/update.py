@@ -44,7 +44,7 @@ async def update_memory(
     # Handle observation updates
     if observation_id:
         if delete:
-            success = store.delete_observation(observation_id)
+            success = await store.delete_observation(observation_id)
             results["observation"] = {
                 "action": "deleted",
                 "observation_id": observation_id,
@@ -53,7 +53,7 @@ async def update_memory(
         elif new_content:
             # Re-embed the new content
             new_vector = await embedder.embed_query(new_content)
-            success = store.update_observation_content(
+            success = await store.update_observation_content(
                 observation_id, new_content, new_vector
             )
             results["observation"] = {
@@ -63,7 +63,7 @@ async def update_memory(
             }
         else:
             # Just retrieve it
-            obs = store.get_observation(observation_id)
+            obs = await store.get_observation(observation_id)
             results["observation"] = {
                 "action": "retrieved",
                 "data": obs,
@@ -72,14 +72,14 @@ async def update_memory(
     # Handle profile updates
     if profile_key:
         if delete:
-            existed = profile_store.delete_key(profile_key)
+            existed = await profile_store.delete_key(profile_key)
             results["profile"] = {
                 "action": "deleted",
                 "key": profile_key,
                 "existed": existed,
             }
         elif new_value is not None:
-            profile = profile_store.set_key(profile_key, new_value)
+            profile = await profile_store.set_key(profile_key, new_value)
             results["profile"] = {
                 "action": "updated",
                 "key": profile_key,
@@ -87,7 +87,7 @@ async def update_memory(
                 "profile": profile,
             }
         else:
-            profile = profile_store.load()
+            profile = await profile_store.load()
             results["profile"] = {
                 "action": "retrieved",
                 "key": profile_key,

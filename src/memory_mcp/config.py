@@ -13,8 +13,9 @@ class Settings(BaseSettings):
     models_dir: Path = Path("/home/acarlham/memory_mcp/models")
 
     # Embedding model
-    embedding_model: str = "Qwen/Qwen3-Embedding-8B"
-    embedding_dim: int = 1024
+    embedding_model: str = "all-MiniLM-L6-v2"
+    embedding_dim: int = 384
+    embedding_device: str = "auto"  # "auto", "cpu", or "cuda"
     gpu_memory_threshold_gb: float = 4.0
 
     # Extraction

@@ -1,6 +1,6 @@
 # Memory MCP Server
 
-A Python MCP server that gives Claude Code persistent memory across conversations. Extracts preferences, code patterns, and subtle signals from conversations, embeds them with Qwen3-Embedding-8B (load-on-demand GPU), stores in LanceDB, and retrieves via vector similarity search.
+A Python MCP server that gives Claude Code persistent memory across conversations. Extracts preferences, code patterns, and decisions from conversations using Claude, embeds them with sentence-transformers, stores in LanceDB, and retrieves via vector similarity search.
 
 ## Tools
 
@@ -9,6 +9,8 @@ A Python MCP server that gives Claude Code persistent memory across conversation
 | `save_conversation_memory(conversation_text)` | Extract + embed + store observations from a conversation | ~$0.01-0.05 |
 | `recall_memories(query, limit, category)` | Search past observations + return user profile | Free |
 | `update_memory(observation_id, profile_key, new_value, delete)` | Correct/remove specific memories | Free |
+
+**Categories** extracted: `coding_preference`, `communication_pattern`, `code_pattern`, `technical_context`, `decision`, `subtle_signal`, `project_context`
 
 ## Setup
 
@@ -37,18 +39,9 @@ cd /path/to/memory_mcp
 pip install -e ".[dev]"
 ```
 
-### 4. Download the embedding model
+The default embedding model (`all-MiniLM-L6-v2`) downloads automatically on first use (~80MB). No manual model download needed.
 
-```bash
-python -c "
-from huggingface_hub import snapshot_download
-snapshot_download('Qwen/Qwen3-Embedding-8B', local_dir='models/Qwen3-Embedding-8B')
-"
-```
-
-This downloads ~15GB of model weights. The model loads to CPU RAM on first use (~30s), then subsequent calls move it to GPU briefly for encoding (~2-3s) and offload back to CPU.
-
-### 5. Set up Anthropic API key
+### 4. Set up Anthropic API key
 
 The extraction step calls Claude Sonnet to analyze conversations. You need an API key from https://console.anthropic.com/settings/keys.
 
@@ -56,7 +49,7 @@ The extraction step calls Claude Sonnet to analyze conversations. You need an AP
 echo "ANTHROPIC_API_KEY=sk-ant-your-key-here" > .env
 ```
 
-### 6. Register with Claude Code
+### 5. Register with Claude Code
 
 ```bash
 claude mcp add memory -- /path/to/miniforge3/envs/memory_mcp/bin/python -m memory_mcp.server
@@ -69,7 +62,7 @@ conda activate memory_mcp
 which python
 ```
 
-### 7. Add auto-save instruction
+### 6. Add auto-save instruction
 
 Add the following to `~/.claude/CLAUDE.md` (create the file if it doesn't exist):
 
@@ -81,9 +74,56 @@ When the user asks how they would approach something, what they'd prefer, or ask
 At the end of every conversation, before closing, call save_conversation_memory with the full conversation text.
 ```
 
-### 8. Verify
+### 7. Verify
 
 Restart Claude Code. The `save_conversation_memory`, `recall_memories`, and `update_memory` tools should be available. Have a conversation, let it save at the end, then start a new conversation and check that memories are recalled.
+
+## Automatic saving with SessionEnd hook (optional)
+
+Instead of relying on Claude to call `save_conversation_memory` before closing, you can use a `SessionEnd` hook to automatically save every conversation when you `/exit`.
+
+The `memory-save` CLI command is installed alongside the package. It reads the session transcript directly and calls the save pipeline without going through MCP.
+
+Add this to `~/.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "memory-save"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+If you already have other settings in that file, merge the `hooks` key into your existing config.
+
+**How it works:** When you `/exit`, Claude Code pipes a JSON object with `transcript_path` to stdin. `memory-save` reads the `.jsonl` transcript, extracts user/assistant messages, and runs the full save pipeline (extraction via Claude API + embedding + LanceDB storage). This runs after the session ends, so there's no delay.
+
+**Manual test:**
+
+```bash
+echo '{"transcript_path":"/path/to/transcript.jsonl"}' | memory-save
+```
+
+Transcript files live in `~/.claude/projects/` under directories named after your project path.
+
+## No GPU? No problem
+
+The embedding model runs on CPU automatically if no GPU is available. The default model (`all-MiniLM-L6-v2`) is small and fast — embedding takes under a second on CPU.
+
+When a CUDA GPU is detected, it's used automatically for faster batch embedding. The `MEMORY_MCP_EMBEDDING_DEVICE` setting controls this:
+
+- `auto` (default): use GPU if available, fall back to CPU
+- `cpu`: force CPU
+- `cuda`: force GPU
 
 ## Configuration
 
@@ -92,48 +132,30 @@ Environment variables (prefix `MEMORY_MCP_` or set in `.env`):
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `ANTHROPIC_API_KEY` | — | Required. Anthropic API key for extraction |
-| `MEMORY_MCP_EMBEDDING_MODEL` | `Qwen/Qwen3-Embedding-8B` | HuggingFace model ID |
-| `MEMORY_MCP_EMBEDDING_DIM` | `1024` | Embedding vector dimensions |
+| `MEMORY_MCP_EMBEDDING_MODEL` | `all-MiniLM-L6-v2` | Sentence-transformers model ID |
+| `MEMORY_MCP_EMBEDDING_DIM` | `384` | Embedding vector dimensions (must match model) |
+| `MEMORY_MCP_EMBEDDING_DEVICE` | `auto` | Device: `auto`, `cpu`, or `cuda` |
 | `MEMORY_MCP_GPU_MEMORY_THRESHOLD_GB` | `4.0` | Min free GPU memory to use CUDA |
 | `MEMORY_MCP_EXTRACTION_MODEL` | `claude-sonnet-4-20250514` | Claude model for extraction |
+| `MEMORY_MCP_DATA_DIR` | `data/` | Data directory |
+| `MEMORY_MCP_MODELS_DIR` | `models/` | Model cache directory |
+| `MEMORY_MCP_LANCE_DB_PATH` | `data/lancedb` | LanceDB storage path |
+| `MEMORY_MCP_PROFILE_PATH` | `data/user_profile.json` | User profile JSON path |
 | `MEMORY_MCP_DEFAULT_RECALL_LIMIT` | `20` | Default number of memories returned |
 | `MEMORY_MCP_RELEVANCE_THRESHOLD` | `0.3` | Min similarity score for recall results |
-
-## No GPU? No problem
-
-The server works without a GPU — the embedding model runs on CPU automatically. The 8B model will be slow on CPU though (~30-60s per embed call). If you're CPU-only, consider using a smaller embedding model by setting:
-
-```bash
-MEMORY_MCP_EMBEDDING_MODEL=Qwen/Qwen3-Embedding-0.6B
-MEMORY_MCP_EMBEDDING_DIM=512
-```
-
-Then download the smaller model (~1.2GB instead of 15GB):
-
-```bash
-python -c "
-from huggingface_hub import snapshot_download
-snapshot_download('Qwen/Qwen3-Embedding-0.6B', local_dir='models/Qwen3-Embedding-0.6B')
-"
-```
 
 ## How it works
 
 **Save flow:**
-1. Claude Sonnet analyzes the conversation and extracts 5-30 observations across 7 categories (coding preferences, code patterns, technical context, decisions, subtle signals, communication patterns, project context)
-2. Qwen3-Embedding-8B embeds all observations into 1024-dim vectors
+1. Claude Sonnet analyzes the conversation via streaming extraction, emitting observations incrementally
+2. Observations are embedded into 384-dim vectors using sentence-transformers
 3. Observations + vectors stored in LanceDB
-4. High-confidence preferences merged into the user profile
+4. High-confidence preferences (>=0.7) merged into the user profile
 
 **Recall flow:**
-1. Query embedded with Qwen3
-2. Vector similarity search in LanceDB
-3. Returns user profile + ranked relevant memories
-
-**GPU management:**
-- Model stays in CPU RAM between calls
-- On embed: check GPU free memory → move to CUDA if >4GB free, else CPU fallback → encode → offload to CPU → `torch.cuda.empty_cache()`
-- RL training or other GPU workloads are never disrupted
+1. Query embedded with the same model
+2. Vector similarity search in LanceDB (cosine distance)
+3. Returns user profile + ranked relevant memories above the relevance threshold
 
 ## Running tests
 
@@ -150,6 +172,7 @@ memory_mcp/
 ├── .env                       # API key (gitignored)
 ├── src/memory_mcp/
 │   ├── server.py              # MCP server entry point (FastMCP, stdio)
+│   ├── save_cli.py            # CLI entry point for SessionEnd hook
 │   ├── config.py              # Settings with env var overrides
 │   ├── models.py              # Pydantic data models
 │   ├── tools/
@@ -157,9 +180,9 @@ memory_mcp/
 │   │   ├── recall.py          # recall_memories
 │   │   └── update.py          # update_memory
 │   ├── extraction/
-│   │   └── extractor.py       # Claude API conversation analysis
+│   │   └── extractor.py       # Claude API streaming conversation analysis
 │   ├── embeddings/
-│   │   └── manager.py         # Load-on-demand Qwen3-8B embedding manager
+│   │   └── manager.py         # Sentence-transformers embedding manager
 │   └── storage/
 │       ├── lance_store.py     # LanceDB vector operations
 │       └── profile.py         # Aggregated user profile (JSON)

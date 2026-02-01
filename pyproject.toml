@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "memory-mcp"
 version = "0.1.0"
-requires-python = ">=3.12"
+requires-python = ">=3.10"
 dependencies = [
     "mcp>=1.20",
     "anthropic>=0.42",
@@ -24,6 +24,9 @@ dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
 ]
+
+[project.scripts]
+memory-save = "memory_mcp.save_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

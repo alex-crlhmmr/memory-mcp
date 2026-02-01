@@ -42,7 +42,7 @@ async def recall_memories(
     query_vector = await embedder.embed_query(query)
 
     # Search
-    memories = store.search(
+    memories = await store.search(
         query_vector=query_vector,
         limit=limit,
         category=category,
@@ -50,7 +50,7 @@ async def recall_memories(
     )
 
     # Load profile
-    user_profile = profile_store.load()
+    user_profile = await profile_store.load()
 
     return {
         "user_profile": user_profile,

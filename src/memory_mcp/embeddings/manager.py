@@ -15,44 +15,47 @@ logger = logging.getLogger(__name__)
 
 
 class EmbeddingManager:
-    """Manages the Qwen3-Embedding-8B model with GPU load-on-demand."""
+    """Manages the Qwen3-Embedding-8B model with configurable device."""
 
     def __init__(self) -> None:
         self._settings = get_settings()
         self._model: SentenceTransformer | None = None
+        self._device: str | None = None
         self._lock = asyncio.Lock()
 
+    def _resolve_device(self) -> str:
+        """Resolve the device to use based on config."""
+        choice = self._settings.embedding_device.lower()
+        if choice == "cpu":
+            return "cpu"
+        if choice == "cuda":
+            return "cuda"
+        # "auto": use CUDA if available, else CPU
+        if torch.cuda.is_available():
+            logger.info("CUDA available, using GPU for embeddings")
+            return "cuda"
+        logger.info("CUDA not available, using CPU for embeddings")
+        return "cpu"
+
     def _load_model(self) -> SentenceTransformer:
-        """Load model to CPU (first call downloads/caches weights)."""
+        """Load model to the configured device (first call downloads/caches weights)."""
         if self._model is None:
-            logger.info("Loading embedding model %s to CPU...", self._settings.embedding_model)
+            device = self._resolve_device()
+            logger.info("Loading embedding model %s to %s...", self._settings.embedding_model, device)
             cache_dir = str(self._settings.models_dir)
             Path(cache_dir).mkdir(parents=True, exist_ok=True)
             self._model = SentenceTransformer(
                 self._settings.embedding_model,
                 cache_folder=cache_dir,
-                device="cpu",
+                device=device,
                 truncate_dim=self._settings.embedding_dim,
             )
-            logger.info("Embedding model loaded to CPU")
+            self._device = device
+            logger.info("Embedding model loaded to %s", device)
         return self._model
 
-    def _gpu_available(self) -> bool:
-        """Check if CUDA is available and has enough free memory."""
-        if not torch.cuda.is_available():
-            return False
-        try:
-            free, _ = torch.cuda.mem_get_info()
-            free_gb = free / (1024**3)
-            threshold = self._settings.gpu_memory_threshold_gb
-            logger.debug("GPU free memory: %.2f GB (threshold: %.1f GB)", free_gb, threshold)
-            return free_gb > threshold
-        except Exception:
-            logger.debug("Could not query GPU memory", exc_info=True)
-            return False
-
     async def embed(self, texts: list[str]) -> list[list[float]]:
-        """Embed texts using Qwen3 with GPU acceleration when available.
+        """Embed texts using Qwen3 on the configured device.
 
         Uses instruct prompt format for retrieval-quality embeddings.
         """
@@ -62,28 +65,16 @@ class EmbeddingManager:
             )
 
     def _embed_sync(self, texts: list[str]) -> list[list[float]]:
-        """Synchronous embedding with GPU load/offload."""
+        """Synchronous embedding on the configured device."""
         model = self._load_model()
-        use_gpu = self._gpu_available()
-
-        if use_gpu:
-            logger.info("Moving embedding model to CUDA")
-            model = model.to("cuda")
-
-        try:
-            embeddings = model.encode(
-                texts,
-                batch_size=8 if use_gpu else 2,
-                show_progress_bar=False,
-                normalize_embeddings=True,
-                prompt_name="query",
-            )
-            return embeddings.tolist()
-        finally:
-            if use_gpu:
-                logger.info("Offloading embedding model to CPU")
-                model = model.to("cpu")
-                torch.cuda.empty_cache()
+        batch_size = 32 if self._device == "cuda" else 16
+        embeddings = model.encode(
+            texts,
+            batch_size=batch_size,
+            show_progress_bar=False,
+            normalize_embeddings=True,
+        )
+        return embeddings.tolist()
 
     async def embed_query(self, query: str) -> list[float]:
         """Embed a single query string for retrieval."""

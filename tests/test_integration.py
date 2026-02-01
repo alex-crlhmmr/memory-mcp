@@ -84,7 +84,7 @@ async def test_save_and_recall_flow(
     assert result["profile_updates_count"] == 1
 
     # Verify profile was updated
-    profile = profile_store.load()
+    profile = await profile_store.load()
     assert profile["preferred_language"] == "Python with strict typing"
 
     # Recall
@@ -129,7 +129,7 @@ async def test_save_recall_update_flow(
     assert update_result["profile"]["value"] == "Rust"
 
     # Verify profile changed
-    profile = profile_store.load()
+    profile = await profile_store.load()
     assert profile["preferred_language"] == "Rust"
 
 
@@ -153,7 +153,7 @@ async def test_delete_observation(
 
     # Get an observation ID from the store to delete
     vec = await mock_embedder.embed_query("test")
-    results = store.search(vec, limit=10, relevance_threshold=0.0)
+    results = await store.search(vec, limit=10, relevance_threshold=0.0)
 
     if results:
         obs_id = results[0].observation_id
@@ -168,7 +168,7 @@ async def test_delete_observation(
         assert delete_result["observation"]["success"] is True
 
         # Verify it's gone
-        assert store.get_observation(obs_id) is None
+        assert await store.get_observation(obs_id) is None
 
 
 @pytest.mark.asyncio

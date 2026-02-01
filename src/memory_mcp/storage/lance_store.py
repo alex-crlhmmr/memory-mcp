@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Optional
@@ -89,13 +90,66 @@ class LanceStore:
                 self._conv_table = db.create_table("conversations", data=empty)
         return self._conv_table
 
-    def store_observations(
+    # -- Async public API --
+
+    async def store_observations(
         self, observations: list[Observation], vectors: list[list[float]]
     ) -> None:
         """Store observations with their embedding vectors."""
         if not observations:
             return
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(
+            None, self._store_observations_sync, observations, vectors
+        )
 
+    async def store_conversation(self, record: ConversationRecord) -> None:
+        """Store conversation metadata."""
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, self._store_conversation_sync, record)
+
+    async def search(
+        self,
+        query_vector: list[float],
+        limit: int = 20,
+        category: Optional[str] = None,
+        relevance_threshold: float = 0.3,
+    ) -> list[MemoryResult]:
+        """Search observations by vector similarity."""
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None, self._search_sync, query_vector, limit, category, relevance_threshold
+        )
+
+    async def get_observation(self, observation_id: str) -> Optional[dict]:
+        """Get a single observation by ID."""
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None, self._get_observation_sync, observation_id
+        )
+
+    async def delete_observation(self, observation_id: str) -> bool:
+        """Delete an observation by ID."""
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None, self._delete_observation_sync, observation_id
+        )
+
+    async def update_observation_content(
+        self, observation_id: str, new_content: str, new_vector: list[float]
+    ) -> bool:
+        """Update an observation's content and re-embed."""
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None, self._update_observation_content_sync,
+            observation_id, new_content, new_vector,
+        )
+
+    # -- Sync implementations --
+
+    def _store_observations_sync(
+        self, observations: list[Observation], vectors: list[list[float]]
+    ) -> None:
         table = self._ensure_observations_table()
         rows = []
         for obs, vec in zip(observations, vectors):
@@ -113,8 +167,7 @@ class LanceStore:
         table.add(rows)
         logger.info("Stored %d observations", len(observations))
 
-    def store_conversation(self, record: ConversationRecord) -> None:
-        """Store conversation metadata."""
+    def _store_conversation_sync(self, record: ConversationRecord) -> None:
         table = self._ensure_conversations_table()
         table.add([{
             "conversation_id": record.conversation_id,
@@ -124,14 +177,13 @@ class LanceStore:
             "observation_count": record.observation_count,
         }])
 
-    def search(
+    def _search_sync(
         self,
         query_vector: list[float],
-        limit: int = 20,
-        category: Optional[str] = None,
-        relevance_threshold: float = 0.3,
+        limit: int,
+        category: Optional[str],
+        relevance_threshold: float,
     ) -> list[MemoryResult]:
-        """Search observations by vector similarity."""
         table = self._ensure_observations_table()
 
         try:
@@ -163,8 +215,7 @@ class LanceStore:
         memories.sort(key=lambda m: m.relevance_score, reverse=True)
         return memories[:limit]
 
-    def get_observation(self, observation_id: str) -> Optional[dict]:
-        """Get a single observation by ID."""
+    def _get_observation_sync(self, observation_id: str) -> Optional[dict]:
         table = self._ensure_observations_table()
         try:
             results = (
@@ -181,8 +232,7 @@ class LanceStore:
             logger.exception("Failed to get observation %s", observation_id)
             return None
 
-    def delete_observation(self, observation_id: str) -> bool:
-        """Delete an observation by ID."""
+    def _delete_observation_sync(self, observation_id: str) -> bool:
         table = self._ensure_observations_table()
         try:
             table.delete(f"id = '{observation_id}'")
@@ -191,10 +241,9 @@ class LanceStore:
             logger.exception("Failed to delete observation %s", observation_id)
             return False
 
-    def update_observation_content(
+    def _update_observation_content_sync(
         self, observation_id: str, new_content: str, new_vector: list[float]
     ) -> bool:
-        """Update an observation's content and re-embed."""
         table = self._ensure_observations_table()
         try:
             table.update(
