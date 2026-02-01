@@ -21,16 +21,13 @@ conda create -n memory_mcp python=3.12 -y
 conda activate memory_mcp
 ```
 
-### 2. Install Jetson PyTorch (Jetson only)
+### 2. Install PyTorch
 
-If you're on a Jetson device, install the appropriate PyTorch wheel before the package:
+The embedding model requires PyTorch. Install the version that matches your hardware **before** installing the package:
 
-```bash
-# Check https://developer.nvidia.com/embedded/downloads for your Jetpack version
-pip install <jetson-pytorch-wheel-url>
-```
-
-On other platforms, the default PyTorch from PyPI will work.
+- **CPU (default):** No extra steps needed — `pip install` in step 3 will pull in a CPU-compatible PyTorch automatically.
+- **NVIDIA GPU:** Install the CUDA-enabled build from https://pytorch.org/get-started/locally/ for faster embedding.
+- **Jetson / other devices:** Install the appropriate wheel for your platform first (e.g. check https://developer.nvidia.com/embedded/downloads for Jetson).
 
 ### 3. Install the package
 
