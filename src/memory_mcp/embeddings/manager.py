@@ -1,4 +1,4 @@
-"""Load-on-demand Qwen3-Embedding-8B embedding manager."""
+"""Load-on-demand embedding manager."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 class EmbeddingManager:
-    """Manages the Qwen3-Embedding-8B model with configurable device."""
+    """Manages the embedding model with configurable device."""
 
     def __init__(self) -> None:
         self._settings = get_settings()
@@ -55,10 +55,7 @@ class EmbeddingManager:
         return self._model
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
-        """Embed texts using Qwen3 on the configured device.
-
-        Uses instruct prompt format for retrieval-quality embeddings.
-        """
+        """Embed texts on the configured device."""
         async with self._lock:
             return await asyncio.get_running_loop().run_in_executor(
                 None, self._embed_sync, texts
